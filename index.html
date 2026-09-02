@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <!-- スマホ画面にぴったりフィットさせる設定 -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>わくわくじゃんけん - ステップ2</title>
+  <title>わくわくじゃんけん - ステップ3</title>
 
   <!-- MediaPipe Hands & カメラライブラリ（CDN）の読み込み -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
@@ -13,8 +13,7 @@
   <style>
     /* --- 全体の基本スタイル --- */
     body {
-      /* パステルイエローの背景色 */
-      background-color: #FFF9E6; 
+      background-color: #FFF9E6; /* パステルイエローの背景色 */
       font-family: 'Arial Rounded MT Bold', 'ヒラギノ丸ゴ ProN', sans-serif;
       margin: 0;
       padding: 10px;
@@ -25,18 +24,28 @@
       height: 100vh;
       box-sizing: border-box;
       user-select: none;
+      overflow: hidden; /* 紙吹雪が画面外にはみ出してもスクロールさせない */
+      position: relative;
     }
 
-    /* --- 1. 上部：対戦相手（動物）エリア --- */
+    /* --- 1. 上部：対戦相手（クマ）エリア --- */
     .character-area {
       text-align: center;
-      margin-top: 10px;
+      margin-top: 5px;
+      z-index: 2;
     }
     
     .character-emoji {
-      font-size: 80px; 
+      font-size: 70px; 
       line-height: 1;
       margin: 0;
+      transition: transform 0.2s ease;
+    }
+
+    .enemy-hand-display {
+      font-size: 40px;
+      height: 45px;
+      margin-top: -5px;
     }
 
     .message-box {
@@ -49,13 +58,14 @@
       color: #FF5555;
       display: inline-block;
       margin-top: 5px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.05);
     }
 
     /* --- 2. 中央：カメラ映像 ＆ 骨格描画エリア --- */
     .camera-container {
       width: 100%;
-      max-width: 320px;
-      height: 240px;
+      max-width: 300px;
+      height: 220px;
       background-color: #E0E0E0;
       border: 6px solid #FFD166;
       border-radius: 25px;
@@ -64,6 +74,7 @@
       display: flex;
       justify-content: center;
       align-items: center;
+      z-index: 2;
     }
 
     .camera-placeholder {
@@ -73,33 +84,47 @@
       position: absolute;
     }
 
-    /* カメラ映像（元の映像は裏で保持・非表示） */
     #webcam {
       display: none;
     }
 
-    /* 骨格を描画するCanvas（重なるように絶対配置） */
     #output-canvas {
       width: 100%;
       height: 100%;
       object-fit: cover;
-      /* 鏡のように左右反転させる設定（自撮りモード用） */
-      transform: scaleX(-1); 
+      transform: scaleX(-1); /* 鏡のように左右反転 */
       display: none;
     }
 
-    /* --- 3. 下部：スタートボタンエリア --- */
+    /* 検出中の自分の手を表示するタグ */
+    .my-hand-badge {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      border: 2px solid #FF477E;
+      border-radius: 12px;
+      padding: 4px 10px;
+      font-size: 14px;
+      font-weight: bold;
+      color: #FF477E;
+      display: none;
+    }
+
+    /* --- 3. 下部：操作ボタンエリア --- */
     .btn-container {
       width: 100%;
       max-width: 300px;
-      margin-bottom: 20px;
+      margin-bottom: 15px;
       text-align: center;
+      z-index: 2;
     }
 
-    .start-btn {
+    /* スタートボタン / ぽん！ボタン */
+    .action-btn {
       width: 100%;
-      padding: 18px 0;
-      font-size: 24px;
+      padding: 16px 0;
+      font-size: 26px;
       font-weight: bold;
       color: #FFFFFF;
       background-color: #FF477E; 
@@ -111,46 +136,74 @@
       transition: all 0.1s ease;
     }
 
-    .start-btn:active {
+    .action-btn:active {
       transform: translateY(4px);
       border-bottom: 2px solid #D62828;
+    }
+
+    /* 「ぽん！」ボタン用の強調スタイル */
+    .action-btn.play-mode {
+      background-color: #FF9F1C;
+      border-bottom: 6px solid #E57C00;
+    }
+
+    /* --- 4. 紙吹雪演出用（JavaScriptでドットを生成） --- */
+    .confetti {
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      top: -20px;
+      z-index: 10;
+      border-radius: 3px;
+      animation: fall linear forwards;
+    }
+
+    @keyframes fall {
+      to {
+        transform: translateY(105vh) rotate(720deg);
+      }
     }
   </style>
 </head>
 <body>
 
-  <!-- 1. 上部：動物エリア -->
+  <!-- 1. 上部：クマエリア -->
   <div class="character-area">
-    <div class="character-emoji">🐻</div>
-    <div class="message-box" id="message">てを かざしてみてね！</div>
+    <div class="character-emoji" id="bear">🐻</div>
+    <div class="enemy-hand-display" id="enemy-hand"></div>
+    <div class="message-box" id="message">「スタート」を おしてね！</div>
   </div>
 
   <!-- 2. 中央：カメラ・Canvasエリア -->
   <div class="camera-container">
     <div class="camera-placeholder" id="placeholder">ボタンを おしてね！</div>
-    <!-- 内部で映像処理用のvideoタグ（画面には直接出しません） -->
     <video id="webcam" playsinline muted></video>
-    <!-- カメラ映像＋骨格を描画するCanvas -->
     <canvas id="output-canvas" width="320" height="240"></canvas>
+    <div class="my-hand-badge" id="my-hand-badge">あなたの手: 判定中</div>
   </div>
 
   <!-- 3. 下部：ボタンエリア -->
   <div class="btn-container">
-    <button class="start-btn" id="start-btn">スタート</button>
+    <button class="action-btn" id="main-btn">スタート</button>
   </div>
 
-  <!-- --- JavaScript：MediaPipe Hand ＆ 描画処理 --- -->
+  <!-- --- JavaScript：ロジック＆判定演出 --- -->
   <script>
-    const startBtn = document.getElementById('start-btn');
+    const mainBtn = document.getElementById('main-btn');
     const webcam = document.getElementById('webcam');
     const canvasElement = document.getElementById('output-canvas');
     const canvasCtx = canvasElement.getContext('2d');
     const placeholder = document.getElementById('placeholder');
     const message = document.getElementById('message');
+    const bear = document.getElementById('bear');
+    const enemyHandDisplay = document.getElementById('enemy-hand');
+    const myHandBadge = document.getElementById('my-hand-badge');
 
     let camera = null;
+    let currentDetectedHand = 'unknown'; // 現在検知されている手（'rock', 'scissors', 'paper', 'unknown'）
+    let isGameStarted = false;
 
-    // 手の関節（21点）を結ぶ線の接続ペアを定義
+    // 手の骨格線ペア
     const HAND_CONNECTIONS = [
       [0,1],[1,2],[2,3],[3,4],        // 親指
       [0,5],[5,6],[6,7],[7,8],        // 人差し指
@@ -159,96 +212,173 @@
       [13,17],[0,17],[17,18],[18,19],[19,20] // 小指・手首
     ];
 
-    // --- 1. MediaPipe Handsのセットアップ ---
+    // --- 1. じゃんけんの手を判定する関数（指が伸びているか折り曲げられているか） ---
+    function detectJankenHand(landmarks) {
+      // 各指先（Tips）と関節のY座標を比較して、指が立っているかを判定
+      // 画面上ではY座標が小さいほど「上（指が伸びている）」になります
+      const isIndexExtended = landmarks[8].y < landmarks[6].y;   // 人差し指
+      const isMiddleExtended = landmarks[12].y < landmarks[10].y; // 中指
+      const isRingExtended = landmarks[16].y < landmarks[14].y;   // 薬指
+      const isPinkyExtended = landmarks[20].y < landmarks[18].y;  // 小指
+
+      // 伸びている指の本数をカウント（人差し指〜小指の4本）
+      const extendedFingersCount = [isIndexExtended, isMiddleExtended, isRingExtended, isPinkyExtended].filter(Boolean).length;
+
+      // 判定ロジック
+      if (extendedFingersCount >= 3) {
+        return 'paper';    // 3本以上指が伸びていたら「パー」
+      } else if (isIndexExtended && isMiddleExtended && !isRingExtended && !isPinkyExtended) {
+        return 'scissors'; // 人差し指と中指だけ伸びていたら「チョキ」
+      } else if (extendedFingersCount === 0) {
+        return 'rock';     // 指が1本も伸びていなければ「グー」
+      }
+      
+      return 'unknown';    // それ以外は判定不能
+    }
+
+    // --- 2. MediaPipe Handsのセットアップ ---
     const hands = new Hands({
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
     });
 
     hands.setOptions({
-      maxNumHands: 1,             // 検知する手の最大数（1人用なので1）
-      modelComplexity: 1,         // 精度のバランス（0:軽さ優先, 1:標準）
-      minDetectionConfidence: 0.5, // 検出の信頼度閾値
-      minTrackingConfidence: 0.5   // 追跡の信頼度閾値
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
     });
 
-    // --- 2. 手が検出されたときの描画処理 ---
+    // --- 3. リアルタイム画像解析と骨格描画 ---
     hands.onResults((results) => {
-      // Canvasを一度クリア
       canvasCtx.save();
       canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-
-      // まず背景にカメラ映像を描画
       canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-      // 手が検出されている場合のみ骨格を描画
       if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        for (const landmarks of results.multiHandLandmarks) {
-          
-          // A. 骨格の線を描画（明るいピンク色）
-          canvasCtx.strokeStyle = '#FF3399'; // /* ここで線の色を変更 */
-          canvasCtx.lineWidth = 5;           // /* ここで線の太さを変更 */
-          canvasCtx.lineCap = 'round';
+        const landmarks = results.multiHandLandmarks[0];
 
-          for (const connection of HAND_CONNECTIONS) {
-            const from = landmarks[connection[0]];
-            const to = landmarks[connection[1]];
-            canvasCtx.beginPath();
-            canvasCtx.moveTo(from.x * canvasElement.width, from.y * canvasElement.height);
-            canvasCtx.lineTo(to.x * canvasElement.width, to.y * canvasElement.height);
-            canvasCtx.stroke();
-          }
+        // 手のじゃんけん判定を実行
+        currentDetectedHand = detectJankenHand(landmarks);
 
-          // B. 関節の点（ドット）を描画（明るい黄色）
-          canvasCtx.fillStyle = '#FFEA00'; // /* ここで点のプロパティを変更 */
-          for (const landmark of landmarks) {
-            canvasCtx.beginPath();
-            canvasCtx.arc(
-              landmark.x * canvasElement.width,
-              landmark.y * canvasElement.height,
-              6, // /* ここで点の大きさを変更 */
-              0,
-              2 * Math.PI
-            );
-            canvasCtx.fill();
-            // 点のフチ取り（くっきり見せるため）
-            canvasCtx.strokeStyle = '#FFFFFF';
-            canvasCtx.lineWidth = 2;
-            canvasCtx.stroke();
-          }
+        // バッジ表示の更新
+        const handEmojiMap = { 'rock': '✊ グー', 'scissors': '✌️ チョキ', 'paper': '✋ パー', 'unknown': '❓ 判定中' };
+        myHandBadge.textContent = `あなたの手: ${handEmojiMap[currentDetectedHand]}`;
+
+        // 骨格の描画（ピンクの線・黄色の点）
+        canvasCtx.strokeStyle = '#FF3399';
+        canvasCtx.lineWidth = 5;
+        canvasCtx.lineCap = 'round';
+        for (const connection of HAND_CONNECTIONS) {
+          const from = landmarks[connection[0]];
+          const to = landmarks[connection[1]];
+          canvasCtx.beginPath();
+          canvasCtx.moveTo(from.x * canvasElement.width, from.y * canvasElement.height);
+          canvasCtx.lineTo(to.x * canvasElement.width, to.y * canvasElement.height);
+          canvasCtx.stroke();
         }
+
+        canvasCtx.fillStyle = '#FFEA00';
+        for (const landmark of landmarks) {
+          canvasCtx.beginPath();
+          canvasCtx.arc(landmark.x * canvasElement.width, landmark.y * canvasElement.height, 6, 0, 2 * Math.PI);
+          canvasCtx.fill();
+          canvasCtx.strokeStyle = '#FFFFFF';
+          canvasCtx.lineWidth = 2;
+          canvasCtx.stroke();
+        }
+      } else {
+        currentDetectedHand = 'unknown';
+        myHandBadge.textContent = 'てを うつしてね！';
       }
 
       canvasCtx.restore();
     });
 
-    // --- 3. スタートボタンを押したときの起動処理 ---
-    startBtn.addEventListener('click', async () => {
-      if (camera) return; // すでに起動している場合はスキップ
+    // --- 4. 紙吹雪を動的に生成する関数 ---
+    function createConfetti() {
+      const colors = ['#FF477E', '#FFD166', '#06D6A0', '#118AB2', '#FF9F1C'];
+      for (let i = 0; i < 50; i++) {
+        const confetti = document.createElement('div');
+        confetti.className = 'confetti';
+        confetti.style.left = Math.random() * 100 + 'vw';
+        confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+        confetti.style.animationDuration = (Math.random() * 2 + 1.5) + 's';
+        document.body.appendChild(confetti);
 
-      try {
-        // MediaPipe付属のCameraユーティリティでインカメラを起動
-        camera = new Camera(webcam, {
-          onFrame: async () => {
-            await hands.send({ image: webcam });
-          },
-          width: 320,
-          height: 240,
-          facingMode: 'user'
-        });
+        // アニメーション終了後に要素を削除
+        setTimeout(() => confetti.remove(), 3500);
+      }
+    }
 
-        await camera.start();
+    // --- 5. じゃんけん勝負の実行関数 ---
+    function playJanken() {
+      if (currentDetectedHand === 'unknown') {
+        message.textContent = 'カメラに てを うつしてね！';
+        return;
+      }
 
-        // 表示の切り替え
-        placeholder.style.display = 'none';
-        canvasElement.style.display = 'block';
+      // クマの手をランダム決定
+      const handsList = ['rock', 'scissors', 'paper'];
+      const enemyHand = handsList[Math.floor(Math.random() * handsList.length)];
 
-        message.textContent = '手がうつっているよ！';
-        startBtn.textContent = 'カメラ起動中';
-        startBtn.style.opacity = '0.7';
+      const emojiMap = { 'rock': '✊', 'scissors': '✌️', 'paper': '✋' };
+      enemyHandDisplay.textContent = emojiMap[enemyHand];
 
-      } catch (error) {
-        console.error('MediaPipe / カメラの起動に失敗しました:', error);
-        alert('カメラの起動またはAIライブラリの読み込みに失敗しました。ネットワーク接続やブラウザ権限を確認してください。');
+      // 勝敗の判定
+      if (currentDetectedHand === enemyHand) {
+        // あいこ
+        bear.textContent = '🐻';
+        message.textContent = 'あいこ！ もういっかい！🌀';
+      } else if (
+        (currentDetectedHand === 'rock' && enemyHand === 'scissors') ||
+        (currentDetectedHand === 'scissors' && enemyHand === 'paper') ||
+        (currentDetectedHand === 'paper' && enemyHand === 'rock')
+      ) {
+        // プレイヤーの勝ち
+        bear.textContent = '🙌🐻✨';
+        message.textContent = 'すごーい！かちだよ！🎉👑';
+        createConfetti(); // 紙吹雪エフェクト起動
+      } else {
+        // プレイヤーの負け（励ます）
+        bear.textContent = '🐻';
+        message.textContent = 'おしい！ もう一回勝負だ！✊';
+      }
+    }
+
+    // --- 6. ボタン押下時の処理（起動 ＆ 「ぽん！」判定） ---
+    mainBtn.addEventListener('click', async () => {
+      // 1回目のタップ：カメラ起動
+      if (!isGameStarted) {
+        try {
+          camera = new Camera(webcam, {
+            onFrame: async () => {
+              await hands.send({ image: webcam });
+            },
+            width: 320,
+            height: 240,
+            facingMode: 'user'
+          });
+
+          await camera.start();
+
+          // UIをゲームプレイ用に切り替え
+          placeholder.style.display = 'none';
+          canvasElement.style.display = 'block';
+          myHandBadge.style.display = 'block';
+
+          message.textContent = 'てを かざして「ぽん！」をおしてね！';
+          mainBtn.textContent = 'ぽん！ ✊✌️✋';
+          mainBtn.classList.add('play-mode');
+          
+          isGameStarted = true;
+
+        } catch (error) {
+          console.error('起動エラー:', error);
+          alert('カメラの起動に失敗しました。アクセス許可を確認してください。');
+        }
+      } else {
+        // 2回目以降のタップ：「ぽん！」勝負実行
+        playJanken();
       }
     });
   </script>
